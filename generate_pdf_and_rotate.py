@@ -33,23 +33,24 @@ def generate_pdf(filename, page_count):
     pdf_buffer = io.BytesIO()
     c = canvas.Canvas(pdf_buffer, pagesize=letter)
 
-    img = create_noise_image(612, 792)  # PDF letter size in pixels
-
-    # Save the image to a temporary file
-    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_img_file:
-        img.save(temp_img_file, format='PNG')
-        temp_img_file_name = temp_img_file.name
-
     for _ in range(page_count):
+        img = create_noise_image(612, 792)  # PDF letter size in pixels
+
+        # Save the image to a temporary file
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_img_file:
+            img.save(temp_img_file, format='PNG')
+            temp_img_file_name = temp_img_file.name
+
         # Draw the image from the temporary file path
         c.drawImage(temp_img_file_name, 0, 0, width=612, height=792)
         c.showPage()
+        os.remove(temp_img_file_name)
+
         print('.', end='', flush=True)
     print('')
 
     print_memory_usage()
     # Remove the temporary image file after use
-    os.remove(temp_img_file_name)
 
     c.save()
 
@@ -79,7 +80,7 @@ def main():
     if len(sys.argv) > 1:
         page_count = int(sys.argv[1])
     else:
-        page_count = 500
+        page_count = 50
 
     generate_pdf(pdf_filename, page_count=page_count)
     print_memory_usage()
