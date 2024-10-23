@@ -4,11 +4,12 @@ import random
 import sys
 import psutil
 import time
+import gc
 from PIL import Image, ImageDraw
 from PyPDF2 import PdfWriter, PdfReader
 from pypdf import PdfWriter as PyPdfWriter, PdfReader as PyPdfReader
 import fitz  # PyMuPDF
-from reportlab.pdfgen import canvas  # FIX: Ensure this import is correct!
+from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 import tempfile
 
@@ -16,11 +17,11 @@ PDF_PAGE_SIZE = (612, 792)  # Letter size in points
 
 ### Utility Functions ###
 
-def print_memory_usage():
-    """Prints the current memory usage of the process."""
+def print_memory_usage(tag=""):
+    """Prints the current memory usage of the process with a tag."""
     process = psutil.Process(os.getpid())
     rss = process.memory_info().rss
-    print(f"Memory usage: {rss / (1024 * 1024):.2f} MB")
+    print(f"{tag}Memory usage: {rss / (1024 * 1024):.2f} MB")
 
 def measure_time(func, *args, **kwargs):
     """Measures and prints the time taken to execute a function."""
@@ -29,6 +30,12 @@ def measure_time(func, *args, **kwargs):
     elapsed = time.time() - start_time
     print(f"Time taken: {elapsed:.2f} seconds")
     return result
+
+def force_gc():
+    """Forces garbage collection and prints the number of tracked objects."""
+    print("Forcing garbage collection...")
+    gc.collect()  # Run garbage collection
+    print(f"Tracked objects: {len(gc.get_objects())}")
 
 ### Image Generation ###
 
@@ -61,11 +68,11 @@ def save_images_as_temp_files(images):
 def convert_image_to_pdf(image_path):
     """Converts a PNG image to a single-page PDF."""
     pdf_buffer = io.BytesIO()
-    c = canvas.Canvas(pdf_buffer, pagesize=letter)  # FIX: Ensure correct usage of canvas
+    c = canvas.Canvas(pdf_buffer, pagesize=letter)
     c.drawImage(image_path, 0, 0, width=PDF_PAGE_SIZE[0], height=PDF_PAGE_SIZE[1])
     c.showPage()
     c.save()
-    pdf_buffer.seek(0)  # Reset the buffer position
+    pdf_buffer.seek(0)
     return pdf_buffer
 
 ### PDF Creation Implementations ###
@@ -95,16 +102,11 @@ def create_pdf_with_pypdf(image_files, output_file):
 def create_pdf_with_pymupdf(image_files, output_file):
     """Creates a PDF using PyMuPDF."""
     print(f"Creating PDF using PyMuPDF: {output_file}")
-    doc = fitz.open()  # Create a new empty PDF
-
+    doc = fitz.open()
     for image_path in image_files:
-        # Convert the PNG image to a one-page PDF using ReportLab
         pdf_buffer = convert_image_to_pdf(image_path)
-        img_doc = fitz.open(stream=pdf_buffer, filetype="pdf")  # Open the buffer as a PDF
-
-        # Insert the single-page PDF into the main document
+        img_doc = fitz.open(stream=pdf_buffer, filetype="pdf")
         doc.insert_pdf(img_doc)
-
     doc.save(output_file)
     doc.close()
 
@@ -120,7 +122,7 @@ def create_pdf_with_reportlab(image_files, output_file):
 ### Main Execution Flow ###
 
 def main():
-    print_memory_usage()
+    print_memory_usage("Initial ")
 
     # Determine the number of pages from the command line, default to 20
     page_count = int(sys.argv[1]) if len(sys.argv) > 1 else 20
@@ -131,23 +133,19 @@ def main():
     # Step 2: Save Images as Temporary Files
     image_files = measure_time(save_images_as_temp_files, images)
 
-    # Step 3: Create PDFs using all four libraries
-    pdf_filename_pypdf2 = 'pypdf2.pdf'
-    pdf_filename_pypdf = 'pypdf.pdf'
-    pdf_filename_pymupdf = 'pymupdf.pdf'
-    pdf_filename_reportlab = 'reportlab.pdf'
+    # Step 3: Test PDF Libraries with Garbage Collection
+    pdf_files = [
+        ("random_noise_pypdf2.pdf", create_pdf_with_pypdf2),
+        ("random_noise_pypdf.pdf", create_pdf_with_pypdf),
+        ("random_noise_pymupdf.pdf", create_pdf_with_pymupdf),
+        ("random_noise_reportlab.pdf", create_pdf_with_reportlab)
+    ]
 
-    measure_time(create_pdf_with_pypdf2, image_files, pdf_filename_pypdf2)
-    print_memory_usage()
-
-    measure_time(create_pdf_with_pypdf, image_files, pdf_filename_pypdf)
-    print_memory_usage()
-
-    measure_time(create_pdf_with_pymupdf, image_files, pdf_filename_pymupdf)
-    print_memory_usage()
-
-    measure_time(create_pdf_with_reportlab, image_files, pdf_filename_reportlab)
-    print_memory_usage()
+    for filename, pdf_func in pdf_files:
+        print(f"\nTesting {pdf_func.__name__}...")
+        measure_time(pdf_func, image_files, filename)
+        print_memory_usage(f"After {pdf_func.__name__} ")
+        force_gc()  # Run garbage collection to free up memory
 
     # Cleanup: Remove temporary files
     print("Cleaning up temporary files...")
@@ -155,4 +153,6 @@ def main():
         os.remove(file)
 
 if __name__ == '__main__':
+    # Enable garbage collection tracking for debugging memory leaks
+    gc.set_debug(gc.DEBUG_UNCOLLECTABLE)
     main()
