@@ -6,129 +6,153 @@ import psutil
 import time
 from PIL import Image, ImageDraw
 from PyPDF2 import PdfWriter, PdfReader
-from pypdf import PdfReader as PyPdfReader, PdfWriter as PyPdfWriter
+from pypdf import PdfWriter as PyPdfWriter, PdfReader as PyPdfReader
 import fitz  # PyMuPDF
-from reportlab.pdfgen import canvas
+from reportlab.pdfgen import canvas  # FIX: Ensure this import is correct!
 from reportlab.lib.pagesizes import letter
 import tempfile
 
-# Function to create a random noise image
-def create_noise_image(width, height):
-    image = Image.new('RGB', (width, height))
-    draw = ImageDraw.Draw(image)
-    for x in range(width):
-        for y in range(height):
-            draw.point((x, y), (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
-    return image
+PDF_PAGE_SIZE = (612, 792)  # Letter size in points
 
-# Measure current memory usage
+### Utility Functions ###
+
 def print_memory_usage():
+    """Prints the current memory usage of the process."""
     process = psutil.Process(os.getpid())
     rss = process.memory_info().rss
     print(f"Memory usage: {rss / (1024 * 1024):.2f} MB")
 
-# Measure elapsed time
 def measure_time(func, *args, **kwargs):
+    """Measures and prints the time taken to execute a function."""
     start_time = time.time()
-    func(*args, **kwargs)
+    result = func(*args, **kwargs)
     elapsed = time.time() - start_time
     print(f"Time taken: {elapsed:.2f} seconds")
-    return elapsed
+    return result
 
-# Create a 500-page PDF with random noise images
-def generate_pdf(filename, page_count):
-    print(f"Generating a {page_count}-page PDF")
-    pdf_buffer = io.BytesIO()
-    c = canvas.Canvas(pdf_buffer, pagesize=letter)
+### Image Generation ###
 
+def generate_noise_images(page_count):
+    """Generates a list of random noise images."""
+    print(f"Generating {page_count} random noise images...")
+    images = []
     for _ in range(page_count):
-        img = create_noise_image(612, 792)
+        img = Image.new('RGB', PDF_PAGE_SIZE)
+        draw = ImageDraw.Draw(img)
+        for x in range(PDF_PAGE_SIZE[0]):
+            for y in range(PDF_PAGE_SIZE[1]):
+                draw.point((x, y), (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
+        images.append(img)
+    print("Image generation complete.")
+    return images
 
-        # Save the image to a temporary file
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_img_file:
-            img.save(temp_img_file, format='PNG')
-            temp_img_file_name = temp_img_file.name
+def save_images_as_temp_files(images):
+    """Saves images as temporary PNG files and returns their paths."""
+    temp_files = []
+    for img in images:
+        temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        img.save(temp_file, format='PNG')
+        temp_files.append(temp_file.name)
+        temp_file.close()
+    return temp_files
 
-        # Draw the image from the temporary file path
-        c.drawImage(temp_img_file_name, 0, 0, width=612, height=792)
-        c.showPage()
-        os.remove(temp_img_file_name)
+### PDF Conversion Helper ###
 
-        print('.', end='', flush=True)
-    print('')
-
-    print_memory_usage()
-
+def convert_image_to_pdf(image_path):
+    """Converts a PNG image to a single-page PDF."""
+    pdf_buffer = io.BytesIO()
+    c = canvas.Canvas(pdf_buffer, pagesize=letter)  # FIX: Ensure correct usage of canvas
+    c.drawImage(image_path, 0, 0, width=PDF_PAGE_SIZE[0], height=PDF_PAGE_SIZE[1])
+    c.showPage()
     c.save()
+    pdf_buffer.seek(0)  # Reset the buffer position
+    return pdf_buffer
 
-    # Save PDF to file
-    with open(filename, 'wb') as f:
-        print_memory_usage()
-        f.write(pdf_buffer.getvalue())
+### PDF Creation Implementations ###
 
-# Rotate PDF using PyPDF2
-def rotate_pdf_pypdf2(input_file, output_file):
-    print("Rotating PDF using PyPDF2")
-    reader = PdfReader(input_file)
+def create_pdf_with_pypdf2(image_files, output_file):
+    """Creates a PDF using PyPDF2."""
+    print(f"Creating PDF using PyPDF2: {output_file}")
     writer = PdfWriter()
-    for page in reader.pages:
-        page.rotate(90)
-        writer.add_page(page)
+    for image_path in image_files:
+        img_pdf_buffer = convert_image_to_pdf(image_path)
+        reader = PdfReader(img_pdf_buffer)
+        writer.add_page(reader.pages[0])
     with open(output_file, 'wb') as f:
         writer.write(f)
 
-# Rotate PDF using pypdf
-def rotate_pdf_pypdf(input_file, output_file):
-    print("Rotating PDF using pypdf")
-    reader = PyPdfReader(input_file)
+def create_pdf_with_pypdf(image_files, output_file):
+    """Creates a PDF using pypdf."""
+    print(f"Creating PDF using pypdf: {output_file}")
     writer = PyPdfWriter()
-    for page in reader.pages:
-        page.rotate(90)
-        writer.add_page(page)
+    for image_path in image_files:
+        img_pdf_buffer = convert_image_to_pdf(image_path)
+        reader = PyPdfReader(img_pdf_buffer)
+        writer.add_page(reader.pages[0])
     with open(output_file, 'wb') as f:
         writer.write(f)
 
-# Rotate PDF using PyMuPDF (fitz)
-def rotate_pdf_pymupdf(input_file, output_file):
-    print("Rotating PDF using PyMuPDF")
-    doc = fitz.open(input_file)
-    for page_num in range(doc.page_count):
-        page = doc.load_page(page_num)
-        page.set_rotation(90)  # Rotate the page 90 degrees
+def create_pdf_with_pymupdf(image_files, output_file):
+    """Creates a PDF using PyMuPDF."""
+    print(f"Creating PDF using PyMuPDF: {output_file}")
+    doc = fitz.open()  # Create a new empty PDF
+
+    for image_path in image_files:
+        # Convert the PNG image to a one-page PDF using ReportLab
+        pdf_buffer = convert_image_to_pdf(image_path)
+        img_doc = fitz.open(stream=pdf_buffer, filetype="pdf")  # Open the buffer as a PDF
+
+        # Insert the single-page PDF into the main document
+        doc.insert_pdf(img_doc)
+
     doc.save(output_file)
     doc.close()
+
+def create_pdf_with_reportlab(image_files, output_file):
+    """Creates a PDF using ReportLab."""
+    print(f"Creating PDF using ReportLab: {output_file}")
+    c = canvas.Canvas(output_file, pagesize=letter)
+    for image_path in image_files:
+        c.drawImage(image_path, 0, 0, width=PDF_PAGE_SIZE[0], height=PDF_PAGE_SIZE[1])
+        c.showPage()
+    c.save()
+
+### Main Execution Flow ###
 
 def main():
     print_memory_usage()
 
-    # Step 1: Generate the PDF
-    pdf_filename = 'random_noise.pdf'
-    if len(sys.argv) > 1:
-        page_count = int(sys.argv[1])
-    else:
-        page_count = 50
+    # Determine the number of pages from the command line, default to 20
+    page_count = int(sys.argv[1]) if len(sys.argv) > 1 else 20
 
-    print("\nGenerating PDF...")
-    measure_time(generate_pdf, pdf_filename, page_count)
+    # Step 1: Generate Noise Images
+    images = measure_time(generate_noise_images, page_count)
+
+    # Step 2: Save Images as Temporary Files
+    image_files = measure_time(save_images_as_temp_files, images)
+
+    # Step 3: Create PDFs using all four libraries
+    pdf_filename_pypdf2 = 'pypdf2.pdf'
+    pdf_filename_pypdf = 'pypdf.pdf'
+    pdf_filename_pymupdf = 'pymupdf.pdf'
+    pdf_filename_reportlab = 'reportlab.pdf'
+
+    measure_time(create_pdf_with_pypdf2, image_files, pdf_filename_pypdf2)
     print_memory_usage()
 
-    # Step 2: Rotate using PyPDF2
-    rotated_pdf_filename_1 = 'rotated_random_noise_pypdf2.pdf'
-    print("\nRotating using PyPDF2...")
-    measure_time(rotate_pdf_pypdf2, pdf_filename, rotated_pdf_filename_1)
+    measure_time(create_pdf_with_pypdf, image_files, pdf_filename_pypdf)
     print_memory_usage()
 
-    # Step 3: Rotate using pypdf
-    rotated_pdf_filename_2 = 'rotated_random_noise_pypdf.pdf'
-    print("\nRotating using pypdf...")
-    measure_time(rotate_pdf_pypdf, pdf_filename, rotated_pdf_filename_2)
+    measure_time(create_pdf_with_pymupdf, image_files, pdf_filename_pymupdf)
     print_memory_usage()
 
-    # Step 4: Rotate using PyMuPDF
-    rotated_pdf_filename_3 = 'rotated_random_noise_pymupdf.pdf'
-    print("\nRotating using PyMuPDF...")
-    measure_time(rotate_pdf_pymupdf, pdf_filename, rotated_pdf_filename_3)
+    measure_time(create_pdf_with_reportlab, image_files, pdf_filename_reportlab)
     print_memory_usage()
+
+    # Cleanup: Remove temporary files
+    print("Cleaning up temporary files...")
+    for file in image_files:
+        os.remove(file)
 
 if __name__ == '__main__':
     main()
